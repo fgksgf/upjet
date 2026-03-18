@@ -29,6 +29,7 @@ func TestStartSharedServer(t *testing.T) {
 	testArgs := []string{"arg1", "arg2"}
 	testReattachConfig1 := `1|5|unix|test1|grpc|`
 	testReattachConfig2 := `1|5|unix|test2|grpc|`
+	testReattachConfigNetrpc := `1|4|unix|test1|netrpc|`
 	testErr := errors.New("boom")
 	type args struct {
 		runner ProviderRunner
@@ -53,6 +54,15 @@ func TestStartSharedServer(t *testing.T) {
 			},
 			want: want{
 				reattachConfig: fmt.Sprintf(`{"provider-test":{"Protocol":"grpc","ProtocolVersion":5,"Pid":%d,"Test": true,"Addr":{"Network": "unix","String": "test1"}}}`, os.Getpid()),
+			},
+		},
+		"SuccessfullyStartedNetrpc": {
+			args: args{
+				runner: NewSharedProvider(WithNativeProviderLogger(logging.NewNopLogger()), WithNativeProviderPath(testPath),
+					WithNativeProviderName(testName), WithNativeProviderArgs(testArgs...), WithNativeProviderExecutor(newExecutorWithStoutPipe(testReattachConfigNetrpc, nil))),
+			},
+			want: want{
+				reattachConfig: fmt.Sprintf(`{"provider-test":{"Protocol":"netrpc","ProtocolVersion":4,"Pid":%d,"Test": true,"Addr":{"Network": "unix","String": "test1"}}}`, os.Getpid()),
 			},
 		},
 		"AlreadyRunning": {

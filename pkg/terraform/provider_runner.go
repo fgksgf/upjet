@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"sync"
 	"time"
 
@@ -23,7 +24,7 @@ const (
 	errFmtTimeout = "timed out after %v while waiting for the reattach configuration string"
 
 	// an example value would be: '{"registry.terraform.io/hashicorp/aws": {"Protocol": "grpc", "ProtocolVersion":5, "Pid":... "Addr":{"Network": "unix","String": "..."}}}'
-	fmtReattachEnv = `{"%s":{"Protocol":"grpc","ProtocolVersion":%d,"Pid":%d,"Test": true,"Addr":{"Network": "unix","String": "%s"}}}`
+	fmtReattachEnv = `{"%s":{"Protocol":"%s","ProtocolVersion":%d,"Pid":%d,"Test": true,"Addr":{"Network": "unix","String": "%s"}}}`
 	fmtSetEnv      = "%s=%s"
 	envMagicCookie = "TF_PLUGIN_MAGIC_COOKIE"
 	// Terraform provider plugin expects this magic cookie in its environment
@@ -35,7 +36,7 @@ const (
 )
 
 var (
-	regexReattachLine = regexp.MustCompile(`.*unix\|(.*)\|grpc.*`)
+	regexReattachLine = regexp.MustCompile(`.*\|(\d+)\|unix\|(.*)\|(grpc|netrpc).*`)
 )
 
 // ProviderRunner is the interface for running
@@ -188,7 +189,8 @@ func (sr *SharedProvider) Start() (string, error) { //nolint:gocyclo
 			if matches == nil {
 				continue
 			}
-			reattachCh <- fmt.Sprintf(fmtReattachEnv, sr.nativeProviderName, sr.protocolVersion, os.Getpid(), matches[1])
+			protocolVersion, _ := strconv.Atoi(matches[1])
+			reattachCh <- fmt.Sprintf(fmtReattachEnv, sr.nativeProviderName, matches[3], protocolVersion, os.Getpid(), matches[2])
 			break
 		}
 
