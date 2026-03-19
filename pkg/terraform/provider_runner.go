@@ -171,7 +171,14 @@ func (sr *SharedProvider) Start() (string, error) { //nolint:gocyclo
 		}()
 		//#nosec G204 no user input
 		cmd := sr.executor.Command(sr.nativeProviderPath, sr.nativeProviderArgs...)
-		cmd.SetEnv(append(os.Environ(), fmt.Sprintf(fmtSetEnv, envMagicCookie, valMagicCookie)))
+		cmd.SetEnv(append(os.Environ(),
+			fmt.Sprintf(fmtSetEnv, envMagicCookie, valMagicCookie),
+			// Force the native provider to use gRPC (protocol 5) instead of netrpc
+			// (protocol 4). Terraform CLI's TF_REATTACH_PROVIDERS only supports
+			// gRPC-based protocols, so netrpc providers must be started in gRPC
+			// mode for the shared provider reattach mechanism to work.
+			"PLUGIN_PROTOCOL_VERSIONS=5",
+		))
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			errCh <- err
