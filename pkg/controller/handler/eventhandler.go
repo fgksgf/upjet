@@ -7,7 +7,6 @@ package handler
 import (
 	"context"
 	"sync"
-	"time"
 
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
 	"k8s.io/apimachinery/pkg/types"
@@ -18,6 +17,11 @@ import (
 )
 
 const NoRateLimiter = ""
+
+// defaultRateLimiter is used as a fallback when callers pass NoRateLimiter.
+// This prevents the 0-second requeue bypass (upjet#592) where requests
+// skip exponential backoff entirely when no rate limiter name is specified.
+const defaultRateLimiter = "default"
 
 // EventHandler handles Kubernetes events by queueing reconcile requests for
 // objects and allows upjet components to queue reconcile requests.
@@ -66,19 +70,20 @@ func (e *EventHandler) RequestReconcile(rateLimiterName, name string, failureLim
 			Name: name,
 		},
 	}
-	var when time.Duration = 0
-	if rateLimiterName != NoRateLimiter {
-		rateLimiter := e.rateLimiterMap[rateLimiterName]
-		if rateLimiter == nil {
-			rateLimiter = workqueue.DefaultTypedControllerRateLimiter[reconcile.Request]()
-			e.rateLimiterMap[rateLimiterName] = rateLimiter
-		}
-		if failureLimit != nil && rateLimiter.NumRequeues(item) > *failureLimit {
-			logger.Info("Failure limit has been exceeded.", "failureLimit", *failureLimit, "numRequeues", rateLimiter.NumRequeues(item))
-			return false
-		}
-		when = rateLimiter.When(item)
+	effectiveName := rateLimiterName
+	if effectiveName == NoRateLimiter {
+		effectiveName = defaultRateLimiter
 	}
+	rateLimiter := e.rateLimiterMap[effectiveName]
+	if rateLimiter == nil {
+		rateLimiter = workqueue.DefaultTypedControllerRateLimiter[reconcile.Request]()
+		e.rateLimiterMap[effectiveName] = rateLimiter
+	}
+	if failureLimit != nil && rateLimiter.NumRequeues(item) > *failureLimit {
+		logger.Info("Failure limit has been exceeded.", "failureLimit", *failureLimit, "numRequeues", rateLimiter.NumRequeues(item))
+		return false
+	}
+	when := rateLimiter.When(item)
 	e.queue.AddAfter(item, when)
 	logger.Debug("Reconcile request has been requeued.", "rateLimiterName", rateLimiterName, "when", when)
 	return true
@@ -89,15 +94,21 @@ func (e *EventHandler) RequestReconcile(rateLimiterName, name string, failureLim
 func (e *EventHandler) Forget(rateLimiterName, name string) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	rateLimiter := e.rateLimiterMap[rateLimiterName]
-	if rateLimiter == nil {
-		return
-	}
-	rateLimiter.Forget(reconcile.Request{
+	item := reconcile.Request{
 		NamespacedName: types.NamespacedName{
 			Name: name,
 		},
-	})
+	}
+	if rl := e.rateLimiterMap[rateLimiterName]; rl != nil {
+		rl.Forget(item)
+	}
+	// Also reset the default rate limiter to prevent delay accumulation
+	// across unrelated requeue cycles.
+	if rateLimiterName != defaultRateLimiter {
+		if rl := e.rateLimiterMap[defaultRateLimiter]; rl != nil {
+			rl.Forget(item)
+		}
+	}
 }
 
 func (e *EventHandler) setQueue(limitingInterface workqueue.TypedRateLimitingInterface[reconcile.Request]) {
