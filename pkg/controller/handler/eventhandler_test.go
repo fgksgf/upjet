@@ -115,7 +115,7 @@ func TestRequestReconcile_NilQueue(t *testing.T) {
 	}
 }
 
-func TestForget_ResetsDefaultRateLimiter(t *testing.T) {
+func TestForget_NamedLimiter_DoesNotResetDefault(t *testing.T) {
 	eh := newTestHandler()
 
 	for i := 0; i < 5; i++ {
@@ -129,8 +129,58 @@ func TestForget_ResetsDefaultRateLimiter(t *testing.T) {
 	}
 
 	eh.Forget("some-named-limiter", "test-resource")
+	if got := rl.NumRequeues(item); got != 5 {
+		t.Errorf("expected default rate limiter to remain at 5 requeues after named Forget, got %d", got)
+	}
+}
+
+func TestForget_NoRateLimiter_ResetsDefault(t *testing.T) {
+	eh := newTestHandler()
+
+	for i := 0; i < 5; i++ {
+		eh.RequestReconcile(NoRateLimiter, "test-resource", nil)
+	}
+
+	rl := eh.rateLimiterMap[defaultRateLimiter]
+	item := newTestItem("test-resource")
+	if got := rl.NumRequeues(item); got != 5 {
+		t.Fatalf("expected 5 requeues, got %d", got)
+	}
+
+	eh.Forget(NoRateLimiter, "test-resource")
 	if got := rl.NumRequeues(item); got != 0 {
-		t.Errorf("expected default rate limiter to be reset to 0 requeues, got %d", got)
+		t.Errorf("expected default rate limiter to be reset to 0 after Forget(NoRateLimiter), got %d", got)
+	}
+}
+
+func TestForget_SchedulerDoesNotAffectDefaultBackoff(t *testing.T) {
+	eh := newTestHandler()
+
+	for i := 0; i < 3; i++ {
+		eh.RequestReconcile("scheduler", "drifty-resource", nil)
+	}
+	for i := 0; i < 5; i++ {
+		eh.RequestReconcile(NoRateLimiter, "drifty-resource", nil)
+	}
+
+	defaultRL := eh.rateLimiterMap[defaultRateLimiter]
+	schedulerRL := eh.rateLimiterMap["scheduler"]
+	item := newTestItem("drifty-resource")
+
+	if got := defaultRL.NumRequeues(item); got != 5 {
+		t.Fatalf("expected 5 default requeues, got %d", got)
+	}
+	if got := schedulerRL.NumRequeues(item); got != 3 {
+		t.Fatalf("expected 3 scheduler requeues, got %d", got)
+	}
+
+	eh.Forget("scheduler", "drifty-resource")
+
+	if got := schedulerRL.NumRequeues(item); got != 0 {
+		t.Errorf("expected scheduler requeues to be 0 after Forget, got %d", got)
+	}
+	if got := defaultRL.NumRequeues(item); got != 5 {
+		t.Errorf("expected default requeues to remain 5 after scheduler Forget, got %d", got)
 	}
 }
 

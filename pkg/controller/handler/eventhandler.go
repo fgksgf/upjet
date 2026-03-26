@@ -90,7 +90,10 @@ func (e *EventHandler) RequestReconcile(rateLimiterName, name string, failureLim
 }
 
 // Forget indicates that the reconcile retries is finished for
-// the specified name.
+// the specified name. Only the rate limiter identified by
+// rateLimiterName is reset; other rate limiters (including the
+// default one) are left untouched so their backoff can accumulate
+// independently.
 func (e *EventHandler) Forget(rateLimiterName, name string) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
@@ -99,15 +102,12 @@ func (e *EventHandler) Forget(rateLimiterName, name string) {
 			Name: name,
 		},
 	}
-	if rl := e.rateLimiterMap[rateLimiterName]; rl != nil {
-		rl.Forget(item)
+	effectiveName := rateLimiterName
+	if effectiveName == NoRateLimiter {
+		effectiveName = defaultRateLimiter
 	}
-	// Also reset the default rate limiter to prevent delay accumulation
-	// across unrelated requeue cycles.
-	if rateLimiterName != defaultRateLimiter {
-		if rl := e.rateLimiterMap[defaultRateLimiter]; rl != nil {
-			rl.Forget(item)
-		}
+	if rl := e.rateLimiterMap[effectiveName]; rl != nil {
+		rl.Forget(item)
 	}
 }
 
