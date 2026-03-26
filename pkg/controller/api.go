@@ -36,6 +36,9 @@ const (
 
 const (
 	rateLimiterCallback = "asyncCallback"
+	// Keep successful async callback follow-up reconciles isolated from the
+	// shared fallback limiter used by NoRateLimiter-based retries.
+	rateLimiterCallbackFollow = "asyncCallbackFollow"
 )
 
 var _ CallbackProvider = &APICallbacks{}
@@ -145,12 +148,13 @@ func (ac *APICallbacks) callbackFn(name, op string) terraform.CallbackFn {
 		}
 		uErr := errors.Wrapf(ac.kube.Status().Update(ctx, tr), errUpdateStatusFmt, tr.GetObjectKind().GroupVersionKind().String(), name, op)
 		if ac.eventHandler != nil {
-			rateLimiter := handler.NoRateLimiter
+			rateLimiter := rateLimiterCallbackFollow
 			switch {
 			case err != nil:
 				rateLimiter = rateLimiterCallback
 			default:
 				ac.eventHandler.Forget(rateLimiterCallback, name)
+				ac.eventHandler.Forget(rateLimiterCallbackFollow, name)
 			}
 			// TODO: use the errors.Join from
 			// github.com/crossplane/crossplane-runtime.
