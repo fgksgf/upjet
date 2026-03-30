@@ -153,8 +153,15 @@ func (ac *APICallbacks) callbackFn(name, op string) terraform.CallbackFn {
 			case err != nil:
 				rateLimiter = rateLimiterCallback
 			default:
+				// Only reset the error-based callback limiter on success.
+				// Do NOT reset asyncCallbackFollow here: for resources with
+				// persistent Terraform drift (e.g. JSON normalization
+				// differences), the follow-up reconcile will detect drift
+				// again and trigger another async update. If we reset the
+				// follow-up limiter on every successful callback, its
+				// exponential backoff can never accumulate, resulting in a
+				// perpetual 5ms retry loop (~20 reconciles/min).
 				ac.eventHandler.Forget(rateLimiterCallback, name)
-				ac.eventHandler.Forget(rateLimiterCallbackFollow, name)
 			}
 			// TODO: use the errors.Join from
 			// github.com/crossplane/crossplane-runtime.
